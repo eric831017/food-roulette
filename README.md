@@ -40,8 +40,10 @@ food-roulette/
 ## Local run
 
 ```bash
-cp .env.example .env   # fill in tokens
-pip install -r requirements.txt --break-system-packages
+cp .env.example .env          # fill in tokens
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -50,14 +52,23 @@ Redirect tracker: `https://<your-domain>/r/{tracking_id}`.
 
 ## VPS deploy sketch
 
+Use a virtual environment so the bot's dependencies stay isolated from the
+system Python (no `--break-system-packages`, no conflicts with apt-managed
+packages).
+
 ```bash
 ssh <user>@<host>
 cd ~ && git clone <repo> food-roulette && cd food-roulette
 cp .env.example .env && vim .env
-pip install -r requirements.txt --break-system-packages
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-systemd unit `/etc/systemd/system/food-roulette.service`:
+systemd unit `/etc/systemd/system/food-roulette.service` (point `ExecStart`
+at the venv's `uvicorn` so it runs with the isolated interpreter):
 
 ```ini
 [Unit]
@@ -68,11 +79,18 @@ After=network.target
 User=<user>
 WorkingDirectory=/home/<user>/food-roulette
 EnvironmentFile=/home/<user>/food-roulette/.env
-ExecStart=/usr/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/<user>/food-roulette/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now food-roulette
 ```
 
 Front with Caddy for HTTPS:
