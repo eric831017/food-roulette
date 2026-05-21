@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
@@ -25,10 +26,10 @@ def redirect_handler(tracking_id: str):
     if action == "navigate":
         mark_accepted(push_log_id)
         log_event(row["line_user_id"], "navigate_click", push_log_id=push_log_id)
+        query = quote(row["place_name"] or f"{row['place_lat']},{row['place_lng']}")
         url = (
-            "https://www.google.com/maps/dir/?api=1"
-            f"&destination={row['place_lat']},{row['place_lng']}"
-            f"&destination_place_id={row['place_id']}"
+            "https://www.google.com/maps/search/?api=1"
+            f"&query={query}&query_place_id={row['place_id']}"
         )
         return RedirectResponse(url=url, status_code=302)
 
