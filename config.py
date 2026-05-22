@@ -20,5 +20,7 @@ TRACKING_SECRET = os.getenv("TRACKING_SECRET", "food-roulette-poc-secret")
 # Recommendation tuning
 DEFAULT_RADIUS_M = 1500
 RAINY_RADIUS_M = 800
-MIN_RATING = 4.0
+EXPANDED_RADIUS_M = 3000
+MIN_POOL_SIZE = 5
+MIN_RATING = 3.5
 DEDUP_DAYS = 3

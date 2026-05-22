@@ -35,7 +35,7 @@ from services.push import (
     reply_flex,
     reply_text,
 )
-from services.restaurant import get_push_log, mark_accepted
+from services.restaurant import add_blacklist, get_push_log, mark_accepted
 from services.tracking import log_event
 
 logger = logging.getLogger(__name__)
@@ -170,4 +170,18 @@ async def _handle_postback(event: PostbackEvent) -> None:
         except ValueError:
             return
         await push_swap(user_id, push_log_id, event.reply_token)
+        return
+
+    if action == "blacklist":
+        place_id = params.get("place_id", "")
+        place_name = params.get("place_name", "")
+        if not place_id:
+            return
+        add_blacklist(user_id, place_id, place_name)
+        log_event(
+            user_id, "blacklist",
+            push_log_id=int(params.get("push_log_id") or 0) or None,
+            metadata={"place_id": place_id, "place_name": place_name},
+        )
+        reply_text(event.reply_token, f"好的，以後不會再推薦 {place_name} 了。")
         return

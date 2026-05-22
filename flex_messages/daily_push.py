@@ -1,6 +1,17 @@
+from urllib.parse import urlencode
+
 from config import GOOGLE_MAPS_API_KEY
 from models import Restaurant
 from services.tracking import navigate_url_for
+
+
+def _blacklist_data(restaurant: Restaurant, push_log_id: int) -> str:
+    return urlencode({
+        "action": "blacklist",
+        "place_id": restaurant.place_id,
+        "place_name": restaurant.name,
+        "push_log_id": push_log_id,
+    })
 
 MEAL_LABELS = {
     "breakfast": "☀️ 早安，今天吃這個",
@@ -38,7 +49,16 @@ def _price_label(level: int | None) -> str:
     return "$$$"
 
 
-def build_daily_push(restaurant: Restaurant, push_log_id: int, meal_type: str) -> dict:
+EXPANDED_HINT = " · 稍微遠一點，但值得走一趟"
+
+
+def build_daily_push(
+    restaurant: Restaurant,
+    push_log_id: int,
+    meal_type: str,
+    expanded: bool = False,
+    social_count: int = 0,
+) -> dict:
     contents = [
         {
             "type": "text",
@@ -88,10 +108,23 @@ def build_daily_push(restaurant: Restaurant, push_log_id: int, meal_type: str) -
         }
     )
 
+    if social_count >= 2:
+        contents.append(
+            {
+                "type": "text",
+                "text": f"本週 {social_count} 人從這裡導航前往",
+                "size": "xs",
+                "color": "#0F6E56",
+            }
+        )
+
+    meal_label = MEAL_LABELS.get(meal_type, "")
+    if expanded and meal_label:
+        meal_label += EXPANDED_HINT
     contents.append(
         {
             "type": "text",
-            "text": MEAL_LABELS.get(meal_type, ""),
+            "text": meal_label,
             "size": "xs",
             "color": "#AAAAAA",
             "margin": "md",
@@ -116,31 +149,51 @@ def build_daily_push(restaurant: Restaurant, push_log_id: int, meal_type: str) -
         },
         "footer": {
             "type": "box",
-            "layout": "horizontal",
-            "spacing": "none",
+            "layout": "vertical",
+            "spacing": "sm",
             "contents": [
                 {
-                    "type": "button",
-                    "action": {
-                        "type": "uri",
-                        "label": "帶我去",
-                        "uri": navigate_url_for(push_log_id),
-                    },
-                    "style": "primary",
-                    "color": "#0F6E56",
-                    "height": "sm",
-                    "flex": 1,
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "none",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "uri",
+                                "label": "帶我去",
+                                "uri": navigate_url_for(push_log_id),
+                            },
+                            "style": "primary",
+                            "color": "#0F6E56",
+                            "height": "sm",
+                            "flex": 1,
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": "換一個",
+                                "data": f"action=swap&push_log_id={push_log_id}",
+                            },
+                            "style": "secondary",
+                            "height": "sm",
+                            "flex": 1,
+                        },
+                    ],
                 },
                 {
-                    "type": "button",
+                    "type": "text",
+                    "text": "不要再推這家",
+                    "size": "xs",
+                    "color": "#AAAAAA",
+                    "align": "center",
+                    "margin": "md",
                     "action": {
                         "type": "postback",
-                        "label": "換一個",
-                        "data": f"action=swap&push_log_id={push_log_id}",
+                        "label": "不要再推這家",
+                        "data": _blacklist_data(restaurant, push_log_id),
                     },
-                    "style": "secondary",
-                    "height": "sm",
-                    "flex": 1,
                 },
             ],
         },

@@ -15,14 +15,31 @@ from linebot.v3.messaging import (
 from config import LINE_CHANNEL_ACCESS_TOKEN
 from flex_messages.daily_push import build_alt_text, build_daily_push
 from flex_messages.weekly_digest import build_weekly_carousel
-from models import Restaurant
 from services.analytics import weekly_stats
 from services.onboard import get_user, pick_anchor_location
-from services.restaurant import pick_restaurant, record_push
+from services.restaurant import (
+    build_candidate_pool,
+    navigation_count_7d,
+    record_push,
+)
+from services.session import (
+    GUIDANCE_SWAP_THRESHOLD,
+    bind_log,
+    get_session_for_log,
+    start_session,
+)
 from services.tracking import log_event
 from services.weather import get_weather
 
 logger = logging.getLogger(__name__)
+
+EXHAUSTED_MSG = (
+    "今天附近的選項都看過了 😅 傳一個新位置給我，"
+    "或是等下一餐讓我重新幫你找！"
+)
+SWAP_GUIDANCE_MSG = (
+    "附近的選項似乎都不太合胃口？傳一個位置給我，我幫你找更遠的好店 🗺️"
+)
 
 
 def _api() -> MessagingApi:
@@ -32,6 +49,17 @@ def _api() -> MessagingApi:
 
 def flex_message_from_dict(alt_text: str, contents: dict) -> FlexMessage:
     return FlexMessage(altText=alt_text, contents=FlexContainer.from_dict(contents))
+
+
+def _card_for(restaurant, push_log_id: int, meal_type: str, expanded: bool) -> FlexMessage:
+    social_count = navigation_count_7d(restaurant.place_id)
+    return flex_message_from_dict(
+        build_alt_text(restaurant, meal_type),
+        build_daily_push(
+            restaurant, push_log_id, meal_type,
+            expanded=expanded, social_count=social_count,
+        ),
+    )
 
 
 async def push_recommendation(
@@ -57,11 +85,11 @@ async def push_recommendation(
         lat, lng = anchor
 
     weather = await get_weather(lat, lng)
-    restaurant = await pick_restaurant(
+    candidates, expanded = await build_candidate_pool(
         line_user_id, lat, lng, meal_type,
         is_rainy=weather["is_rainy"], is_adhoc=is_adhoc,
     )
-    if not restaurant:
+    if not candidates:
         if reply_token:
             _api().reply_message(ReplyMessageRequest(
                 replyToken=reply_token,
@@ -69,13 +97,19 @@ async def push_recommendation(
             ))
         return False
 
+    session = start_session(
+        line_user_id, meal_type, lat, lng,
+        weather["is_rainy"], is_adhoc, candidates,
+    )
+    restaurant = session.next_restaurant()
+    if not restaurant:
+        return False
+
     push_log_id = record_push(
         line_user_id, restaurant, meal_type, weather["condition"], is_adhoc
     )
-    flex = flex_message_from_dict(
-        build_alt_text(restaurant, meal_type),
-        build_daily_push(restaurant, push_log_id, meal_type),
-    )
+    bind_log(push_log_id, session)
+    flex = _card_for(restaurant, push_log_id, meal_type, expanded)
 
     if reply_token:
         _api().reply_message(ReplyMessageRequest(replyToken=reply_token, messages=[flex]))
@@ -95,45 +129,83 @@ async def push_swap(line_user_id: str, original_push_log_id: int, reply_token: s
     increment_swap(original_push_log_id)
     log_event(line_user_id, "swap", push_log_id=original_push_log_id)
 
-    user = get_user(line_user_id)
-    if not user:
-        return False
-
-    from datetime import datetime
-    if original["is_adhoc"]:
-        lat, lng = original["place_lat"], original["place_lng"]  # rough fallback origin
-        # we no longer have original origin; use stored place as proxy
-    else:
-        anchor = pick_anchor_location(user, datetime.now().isoweekday())
-        if not anchor:
+    session = get_session_for_log(original_push_log_id)
+    if session is None:
+        session = await _rebuild_session(line_user_id, original)
+        if session is None:
+            _api().reply_message(ReplyMessageRequest(
+                replyToken=reply_token,
+                messages=[TextMessage(text=EXHAUSTED_MSG)],
+            ))
             return False
-        lat, lng = anchor
 
-    weather = await get_weather(lat, lng)
-    excluded = {original["place_id"]}
-    restaurant = await pick_restaurant(
-        line_user_id, lat, lng, meal_type,
-        is_rainy=weather["is_rainy"],
-        exclude_place_ids=excluded,
-        is_adhoc=bool(original["is_adhoc"]),
-    )
-    if not restaurant:
+    session.swap_count += 1
+    restaurant = session.next_restaurant()
+    expanded = False
+
+    if restaurant is None:
+        # Cache exhausted: widen the radius and exclude everything seen so far.
+        new_candidates, _ = await build_candidate_pool(
+            session.line_user_id, session.origin_lat, session.origin_lng,
+            session.meal_type, is_rainy=session.is_rainy,
+            is_adhoc=session.is_adhoc,
+            exclude_place_ids=set(session.shown_place_ids),
+            force_expanded=True,
+        )
+        session.extend(new_candidates)
+        restaurant = session.next_restaurant()
+        expanded = True
+
+    if restaurant is None:
         _api().reply_message(ReplyMessageRequest(
             replyToken=reply_token,
-            messages=[TextMessage(text="附近真的沒得換了😅 換個地點再試試？")],
+            messages=[TextMessage(text=EXHAUSTED_MSG)],
         ))
         return False
 
     new_log_id = record_push(
-        line_user_id, restaurant, meal_type,
-        weather["condition"], bool(original["is_adhoc"]),
+        session.line_user_id, restaurant, meal_type,
+        original["weather_condition"] or "", bool(session.is_adhoc),
     )
-    flex = flex_message_from_dict(
-        build_alt_text(restaurant, meal_type),
-        build_daily_push(restaurant, new_log_id, meal_type),
-    )
-    _api().reply_message(ReplyMessageRequest(replyToken=reply_token, messages=[flex]))
+    bind_log(new_log_id, session)
+    flex = _card_for(restaurant, new_log_id, meal_type, expanded)
+
+    messages = [flex]
+    if session.swap_count > GUIDANCE_SWAP_THRESHOLD and not session.guidance_sent:
+        session.guidance_sent = True
+        messages.append(TextMessage(text=SWAP_GUIDANCE_MSG))
+
+    _api().reply_message(ReplyMessageRequest(replyToken=reply_token, messages=messages))
     return True
+
+
+async def _rebuild_session(line_user_id: str, original):
+    """Reconstruct a session after a restart, using the expanded radius."""
+    user = get_user(line_user_id)
+    is_adhoc = bool(original["is_adhoc"])
+    if is_adhoc:
+        lat, lng = original["place_lat"], original["place_lng"]
+    else:
+        if not user:
+            return None
+        from datetime import datetime
+        anchor = pick_anchor_location(user, datetime.now().isoweekday())
+        if not anchor:
+            return None
+        lat, lng = anchor
+
+    weather = await get_weather(lat, lng)
+    candidates, _ = await build_candidate_pool(
+        line_user_id, lat, lng, original["meal_type"],
+        is_rainy=weather["is_rainy"], is_adhoc=is_adhoc,
+        exclude_place_ids={original["place_id"]},
+    )
+    if not candidates:
+        return None
+    return start_session(
+        line_user_id, original["meal_type"], lat, lng,
+        weather["is_rainy"], is_adhoc, candidates,
+    )
 
 
 def push_weekly_digest_to(line_user_id: str) -> None:
