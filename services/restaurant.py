@@ -10,7 +10,9 @@ import httpx
 from config import (
     DEDUP_DAYS,
     DEFAULT_RADIUS_M,
+    EXPANDED_RADIUS_M,
     GOOGLE_MAPS_API_KEY,
+    MIN_POOL_SIZE,
     MIN_RATING,
     RAINY_RADIUS_M,
 )
@@ -171,6 +173,39 @@ def _user_exclusions(line_user_id: str) -> set[str]:
     return {row["excluded_type"] for row in rows}
 
 
+def _user_blacklist(line_user_id: str) -> set[str]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT place_id FROM user_blacklist WHERE line_user_id = ?",
+            (line_user_id,),
+        ).fetchall()
+    return {row["place_id"] for row in rows}
+
+
+def add_blacklist(line_user_id: str, place_id: str, place_name: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_blacklist "
+            "(line_user_id, place_id, place_name) VALUES (?, ?, ?)",
+            (line_user_id, place_id, place_name),
+        )
+
+
+def navigation_count_7d(place_id: str) -> int:
+    """Distinct users who clicked '帶我去' for this place in the past 7 days."""
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(DISTINCT pl.line_user_id) AS n
+               FROM events e
+               JOIN push_logs pl ON pl.id = e.push_log_id
+               WHERE e.event_type = 'navigate_click'
+                 AND pl.place_id = ? AND e.created_at >= ?""",
+            (place_id, cutoff),
+        ).fetchone()
+    return int(row["n"] or 0)
+
+
 def _user_preference_boost(line_user_id: str) -> dict[str, float]:
     """Return type -> multiplier based on past accepted recommendations."""
     with get_conn() as conn:
@@ -236,30 +271,18 @@ def _candidate_to_restaurant(
     )
 
 
-async def pick_restaurant(
-    line_user_id: str,
-    lat: float,
-    lng: float,
+def _filter_pool(
+    candidates: list[dict],
     meal_type: str,
-    is_rainy: bool = False,
-    exclude_place_ids: Optional[set[str]] = None,
-    is_adhoc: bool = False,
-) -> Optional[Restaurant]:
-    radius = RAINY_RADIUS_M if is_rainy else DEFAULT_RADIUS_M
-    candidates = await fetch_nearby(lat, lng, radius)
-    if not candidates:
-        return None
-
-    excluded_ids = set(exclude_place_ids or set())
-    if not is_adhoc:
-        excluded_ids |= _recently_pushed_place_ids(line_user_id, DEDUP_DAYS)
-
-    excluded_types = _user_exclusions(line_user_id)
-    user_boost = {} if is_adhoc else _user_preference_boost(line_user_id)
-
+    excluded_ids: set[str],
+    excluded_types: set[str],
+    blacklist_ids: set[str],
+    user_boost: dict[str, float],
+) -> list[tuple[dict, float]]:
     pool: list[tuple[dict, float]] = []
     for c in candidates:
-        if c.get("place_id") in excluded_ids:
+        pid = c.get("place_id")
+        if pid in excluded_ids or pid in blacklist_ids:
             continue
         inferred = infer_type(c.get("name", ""), c.get("types") or [])
         if inferred in excluded_types:
@@ -267,25 +290,74 @@ async def pick_restaurant(
         w = _weight_for(c, meal_type, user_boost)
         if w > 0:
             pool.append((c, w))
+    return pool
+
+
+def _weighted_order(pool: list[tuple[dict, float]]) -> list[dict]:
+    """Weighted shuffle: higher weight tends to come earlier, order is fixed."""
+    items = list(pool)
+    ordered: list[dict] = []
+    while items:
+        weights = [w for _, w in items]
+        idx = random.choices(range(len(items)), weights=weights, k=1)[0]
+        ordered.append(items.pop(idx)[0])
+    return ordered
+
+
+async def build_candidate_pool(
+    line_user_id: str,
+    lat: float,
+    lng: float,
+    meal_type: str,
+    is_rainy: bool = False,
+    is_adhoc: bool = False,
+    exclude_place_ids: Optional[set[str]] = None,
+    force_expanded: bool = False,
+) -> tuple[list[Restaurant], bool]:
+    """Fetch, filter and weight-order nearby restaurants.
+
+    Returns (ordered_restaurants, expanded) where `expanded` indicates the
+    expanded search radius was used because the normal pool was too small.
+    """
+    base_excluded = set(exclude_place_ids or set())
+    if not is_adhoc:
+        base_excluded |= _recently_pushed_place_ids(line_user_id, DEDUP_DAYS)
+
+    excluded_types = _user_exclusions(line_user_id)
+    blacklist_ids = _user_blacklist(line_user_id)
+    user_boost = {} if is_adhoc else _user_preference_boost(line_user_id)
+
+    base_radius = RAINY_RADIUS_M if is_rainy else DEFAULT_RADIUS_M
+    radius = EXPANDED_RADIUS_M if force_expanded else base_radius
+    expanded = force_expanded
+
+    candidates = await fetch_nearby(lat, lng, radius)
+    pool = _filter_pool(
+        candidates, meal_type, base_excluded, excluded_types,
+        blacklist_ids, user_boost,
+    )
+
+    # Dynamic radius expansion when the filtered pool is too small.
+    if len(pool) < MIN_POOL_SIZE and not expanded:
+        expanded_candidates = await fetch_nearby(lat, lng, EXPANDED_RADIUS_M)
+        if expanded_candidates:
+            expanded_pool = _filter_pool(
+                expanded_candidates, meal_type, base_excluded, excluded_types,
+                blacklist_ids, user_boost,
+            )
+            if len(expanded_pool) > len(pool):
+                candidates, pool, expanded = expanded_candidates, expanded_pool, True
 
     if not pool:
-        # Fallback: relax dedup if we ran out
-        for c in candidates:
-            if c.get("place_id") in (exclude_place_ids or set()):
-                continue
-            inferred = infer_type(c.get("name", ""), c.get("types") or [])
-            if inferred in excluded_types:
-                continue
-            w = _weight_for(c, meal_type, user_boost)
-            if w > 0:
-                pool.append((c, w))
+        # Fallback: relax dedup but still honour explicit exclusions/blacklist.
+        relaxed_excluded = set(exclude_place_ids or set())
+        pool = _filter_pool(
+            candidates, meal_type, relaxed_excluded, excluded_types,
+            blacklist_ids, user_boost,
+        )
 
-    if not pool:
-        return None
-
-    weights = [w for _, w in pool]
-    chosen = random.choices([c for c, _ in pool], weights=weights, k=1)[0]
-    return _candidate_to_restaurant(chosen, lat, lng)
+    ordered = _weighted_order(pool)
+    return [_candidate_to_restaurant(c, lat, lng) for c in ordered], expanded
 
 
 def record_push(

@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS user_exclusions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (line_user_id, excluded_type)
 );
+
+CREATE TABLE IF NOT EXISTS user_blacklist (
+    line_user_id TEXT,
+    place_id TEXT,
+    place_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (line_user_id, place_id)
+);
 """
 
 

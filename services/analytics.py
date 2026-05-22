@@ -54,6 +54,16 @@ def weekly_stats(days: int = 7) -> dict:
             (cutoff,),
         ).fetchall()
 
+        most_blacklisted = conn.execute(
+            """SELECT place_name, COUNT(DISTINCT line_user_id) AS n
+               FROM user_blacklist
+               WHERE created_at >= ?
+               GROUP BY place_id, place_name
+               ORDER BY n DESC
+               LIMIT 1""",
+            (cutoff,),
+        ).fetchone()
+
         most_swappy = conn.execute(
             """SELECT line_user_id, MAX(swap_count) AS max_swaps
                FROM push_logs
@@ -98,6 +108,7 @@ def weekly_stats(days: int = 7) -> dict:
         "top_places": [dict(r) for r in top_places],
         "type_distribution": type_dist,
         "most_swappy_user": dict(most_swappy) if most_swappy else None,
+        "most_blacklisted": dict(most_blacklisted) if most_blacklisted else None,
         "user_quotes": quotes[:3],
         "start": (datetime.utcnow() - timedelta(days=days)).date().isoformat(),
         "end": datetime.utcnow().date().isoformat(),

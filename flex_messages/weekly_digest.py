@@ -124,6 +124,22 @@ def _social_card(stats: dict) -> dict:
             {"type": "text", "text": "大家都很果斷！", "size": "sm", "color": "#888888"}
         )
 
+    blacklisted = stats.get("most_blacklisted")
+    if blacklisted and blacklisted.get("n"):
+        body_contents.append({"type": "separator", "margin": "md"})
+        body_contents.append(
+            {"type": "text", "text": "🚫 本週被最多人封殺", "weight": "bold", "size": "md", "margin": "md"}
+        )
+        body_contents.append(
+            {
+                "type": "text",
+                "text": f"{blacklisted['place_name']}，被 {blacklisted['n']} 人說「不要再推」。",
+                "size": "sm",
+                "color": "#444444",
+                "wrap": True,
+            }
+        )
+
     body_contents.append({"type": "separator", "margin": "md"})
     body_contents.append(
         {"type": "text", "text": "💬 大家怎麼說", "weight": "bold", "size": "md", "margin": "md"}
