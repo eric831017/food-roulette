@@ -4,6 +4,20 @@ from config import GOOGLE_MAPS_API_KEY
 from models import Restaurant
 from services.tracking import navigate_url_for
 
+MEAL_LABELS = {
+    "breakfast": "☀️ 早安，今天吃這個",
+    "lunch": "🌞 午餐時間到",
+    "dinner": "🌙 晚餐吃什麼",
+    "supper": "🌙 肚子餓了？",
+}
+
+EXPANDED_HINT = " · 稍微遠一點，但值得走一趟"
+TOP_PICK_MARK = " ⭐ 首選"
+
+PLACEHOLDER_PHOTO = (
+    "https://via.placeholder.com/800x520.png?text=Food+Roulette"
+)
+
 
 def _blacklist_data(restaurant: Restaurant, push_log_id: int) -> str:
     return urlencode({
@@ -12,16 +26,6 @@ def _blacklist_data(restaurant: Restaurant, push_log_id: int) -> str:
         "place_name": restaurant.name,
         "push_log_id": push_log_id,
     })
-
-MEAL_LABELS = {
-    "breakfast": "☀️ 早安，今天吃這個",
-    "lunch": "🌞 午餐時間到",
-    "dinner": "🌙 晚餐吃什麼",
-}
-
-PLACEHOLDER_PHOTO = (
-    "https://via.placeholder.com/800x520.png?text=Food+Roulette"
-)
 
 
 def _photo_url(photo_reference: str | None) -> str:
@@ -49,15 +53,13 @@ def _price_label(level: int | None) -> str:
     return "$$$"
 
 
-EXPANDED_HINT = " · 稍微遠一點，但值得走一趟"
-
-
-def build_daily_push(
+def build_daily_bubble(
     restaurant: Restaurant,
     push_log_id: int,
     meal_type: str,
     expanded: bool = False,
     social_count: int = 0,
+    is_top_pick: bool = False,
 ) -> dict:
     contents = [
         {
@@ -119,7 +121,9 @@ def build_daily_push(
         )
 
     meal_label = MEAL_LABELS.get(meal_type, "")
-    if expanded and meal_label:
+    if meal_label and is_top_pick:
+        meal_label += TOP_PICK_MARK
+    if meal_label and expanded:
         meal_label += EXPANDED_HINT
     contents.append(
         {
@@ -153,34 +157,15 @@ def build_daily_push(
             "spacing": "sm",
             "contents": [
                 {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "spacing": "none",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "uri",
-                                "label": "帶我去",
-                                "uri": navigate_url_for(push_log_id),
-                            },
-                            "style": "primary",
-                            "color": "#0F6E56",
-                            "height": "sm",
-                            "flex": 1,
-                        },
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "postback",
-                                "label": "換一個",
-                                "data": f"action=swap&push_log_id={push_log_id}",
-                            },
-                            "style": "secondary",
-                            "height": "sm",
-                            "flex": 1,
-                        },
-                    ],
+                    "type": "button",
+                    "action": {
+                        "type": "uri",
+                        "label": "帶我去",
+                        "uri": navigate_url_for(push_log_id),
+                    },
+                    "style": "primary",
+                    "color": "#0F6E56",
+                    "height": "sm",
                 },
                 {
                     "type": "text",
@@ -200,5 +185,44 @@ def build_daily_push(
     }
 
 
-def build_alt_text(restaurant: Restaurant, meal_type: str) -> str:
-    return f"{MEAL_LABELS.get(meal_type, '推薦')}：{restaurant.name}"
+def build_daily_carousel(bubbles: list[dict]) -> dict:
+    return {"type": "carousel", "contents": bubbles}
+
+
+def build_swap_batch_bubble() -> dict:
+    return {
+        "type": "bubble",
+        "size": "micro",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "都不喜歡？",
+                    "size": "sm",
+                    "color": "#888888",
+                    "align": "center",
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#0F6E56",
+                    "height": "sm",
+                    "action": {
+                        "type": "postback",
+                        "label": "換一批",
+                        "data": "action=swap_batch",
+                    },
+                },
+            ],
+        },
+    }
+
+
+def build_alt_text_carousel(restaurants: list[Restaurant], meal_type: str) -> str:
+    if not restaurants:
+        return MEAL_LABELS.get(meal_type, "推薦")
+    names = "、".join(r.name for r in restaurants[:3])
+    return f"{MEAL_LABELS.get(meal_type, '推薦')}：{names}"

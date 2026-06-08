@@ -9,9 +9,6 @@ class User:
     location_1_lat: Optional[float] = None
     location_1_lng: Optional[float] = None
     location_1_name: Optional[str] = None
-    location_2_lat: Optional[float] = None
-    location_2_lng: Optional[float] = None
-    location_2_name: Optional[str] = None
     onboard_complete: bool = False
 
 

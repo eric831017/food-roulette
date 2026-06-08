@@ -11,7 +11,8 @@ from datetime import datetime
 
 from models import Restaurant
 
-GUIDANCE_SWAP_THRESHOLD = 5
+BATCH_SIZE = 3
+GUIDANCE_BATCH_THRESHOLD = 2
 
 
 @dataclass
@@ -26,18 +27,19 @@ class SwapSession:
     candidates: list[Restaurant] = field(default_factory=list)
     index: int = 0
     shown_place_ids: set[str] = field(default_factory=set)
-    swap_count: int = 0
+    batch_count: int = 0
     guidance_sent: bool = False
 
-    def next_restaurant(self) -> Restaurant | None:
-        while self.index < len(self.candidates):
+    def next_batch(self, size: int = BATCH_SIZE) -> list[Restaurant]:
+        out: list[Restaurant] = []
+        while self.index < len(self.candidates) and len(out) < size:
             restaurant = self.candidates[self.index]
             self.index += 1
             if restaurant.place_id in self.shown_place_ids:
                 continue
             self.shown_place_ids.add(restaurant.place_id)
-            return restaurant
-        return None
+            out.append(restaurant)
+        return out
 
     def extend(self, restaurants: list[Restaurant]) -> None:
         for r in restaurants:
@@ -48,6 +50,7 @@ class SwapSession:
 _lock = threading.Lock()
 _sessions: dict[str, SwapSession] = {}
 _log_to_key: dict[int, str] = {}
+_user_to_key: dict[str, str] = {}
 
 
 def session_key(line_user_id: str, meal_type: str, is_adhoc: bool) -> str:
@@ -78,12 +81,19 @@ def start_session(
     )
     with _lock:
         _sessions[key] = session
+        _user_to_key[line_user_id] = key
     return session
 
 
 def get_session_for_log(push_log_id: int) -> SwapSession | None:
     with _lock:
         key = _log_to_key.get(push_log_id)
+        return _sessions.get(key) if key else None
+
+
+def get_active_session(line_user_id: str) -> SwapSession | None:
+    with _lock:
+        key = _user_to_key.get(line_user_id)
         return _sessions.get(key) if key else None
 
 

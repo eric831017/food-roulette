@@ -48,6 +48,18 @@ MEAL_TYPE_WEIGHTS: dict[str, dict[str, list[str]]] = {
         "exclude": ["早餐", "豆漿"],
     },
 }
+# Supper shares dinner's filtering; only the user-facing label differs.
+MEAL_TYPE_WEIGHTS["supper"] = MEAL_TYPE_WEIGHTS["dinner"]
+
+
+def meal_type_for_hour(hour: int) -> str:
+    if 6 <= hour < 10:
+        return "breakfast"
+    if 10 <= hour < 14:
+        return "lunch"
+    if 14 <= hour < 20:
+        return "dinner"
+    return "supper"
 
 # Keyword -> human-readable type label (used for storage + analytics).
 TYPE_LABELS: list[tuple[str, str]] = [
@@ -389,14 +401,6 @@ def record_push(
             ),
         )
         return cur.lastrowid
-
-
-def increment_swap(push_log_id: int) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE push_logs SET swap_count = swap_count + 1 WHERE id = ?",
-            (push_log_id,),
-        )
 
 
 def mark_accepted(push_log_id: int) -> None:

@@ -1,3 +1,6 @@
+LOCATION_URI = "line://nv/location"
+
+
 def welcome_card() -> dict:
     return {
         "type": "bubble",
@@ -45,7 +48,7 @@ def welcome_card() -> dict:
                     "action": {
                         "type": "uri",
                         "label": "設定我的位置",
-                        "uri": "https://line.me/R/nv/location",
+                        "uri": LOCATION_URI,
                     },
                 }
             ],
@@ -53,10 +56,10 @@ def welcome_card() -> dict:
     }
 
 
-def ask_second_location_card(first_name: str) -> dict:
+def reset_location_card() -> dict:
     return {
         "type": "bubble",
-        "size": "mega",
+        "size": "kilo",
         "body": {
             "type": "box",
             "layout": "vertical",
@@ -64,25 +67,11 @@ def ask_second_location_card(first_name: str) -> dict:
             "contents": [
                 {
                     "type": "text",
-                    "text": "收到！",
-                    "weight": "bold",
-                    "size": "lg",
-                },
-                {
-                    "type": "text",
-                    "text": f"已設為你的位置「{first_name}」。",
-                    "size": "sm",
+                    "text": "請傳送你的新位置 📍",
+                    "size": "md",
                     "color": "#444444",
                     "wrap": True,
-                },
-                {
-                    "type": "text",
-                    "text": "還有第二個常去的地方嗎？（例如：週末家裡）",
-                    "size": "sm",
-                    "color": "#888888",
-                    "wrap": True,
-                    "margin": "md",
-                },
+                }
             ],
         },
         "footer": {
@@ -97,68 +86,10 @@ def ask_second_location_card(first_name: str) -> dict:
                     "height": "sm",
                     "action": {
                         "type": "uri",
-                        "label": "再設一個",
-                        "uri": "https://line.me/R/nv/location",
+                        "label": "選擇位置",
+                        "uri": LOCATION_URI,
                     },
-                },
-                {
-                    "type": "button",
-                    "style": "secondary",
-                    "height": "sm",
-                    "action": {
-                        "type": "postback",
-                        "label": "這樣就好",
-                        "data": "action=onboard_complete",
-                    },
-                },
-            ],
-        },
-    }
-
-
-def onboard_summary_card(loc1_name: str, loc2_name: str | None) -> dict:
-    rows = [
-        {
-            "type": "box",
-            "layout": "baseline",
-            "spacing": "sm",
-            "contents": [
-                {"type": "text", "text": "📍", "size": "sm", "flex": 0},
-                {"type": "text", "text": loc1_name or "—", "size": "sm", "color": "#444444"},
-            ],
-        }
-    ]
-    if loc2_name:
-        rows.append(
-            {
-                "type": "box",
-                "layout": "baseline",
-                "spacing": "sm",
-                "contents": [
-                    {"type": "text", "text": "📍", "size": "sm", "flex": 0},
-                    {"type": "text", "text": loc2_name, "size": "sm", "color": "#444444"},
-                ],
-            }
-        )
-
-    return {
-        "type": "bubble",
-        "size": "mega",
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "spacing": "md",
-            "contents": [
-                {"type": "text", "text": "設定完成 ✓", "weight": "bold", "size": "lg"},
-                *rows,
-                {
-                    "type": "text",
-                    "text": "明天早上 06:30 開始，我會幫你決定早餐。隨時傳位置給我，也能馬上推薦！",
-                    "size": "sm",
-                    "color": "#888888",
-                    "wrap": True,
-                    "margin": "md",
-                },
+                }
             ],
         },
     }

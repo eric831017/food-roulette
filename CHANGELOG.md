@@ -2,6 +2,63 @@
 
 本專案的所有重大變更都會記錄在這個檔案。
 
+## [Unreleased] - 2026-06-08
+
+第二輪整合更新：簡化 Onboard、改為三家 carousel、新增重設位置入口、加入宵夜時段，
+並把先前的單卡 swap 機制改寫為「換一批」批次模式。核心架構（FastAPI + APScheduler
++ SQLite）、推播時段（06:30 / 11:30 / 17:30）、每週快報排程（週一 08:00）、Adhoc
+臨時搜索、redirect tracker、天氣感知、時段－餐廳類型加權映射皆維持不變。
+
+### 新增
+
+- **Onboard 後立即推薦**：用戶傳完唯一位置後，回覆「設定完成！先幫你選一家——」
+  並立刻推送一組三家餐廳的 carousel；消滅 onboard 後的空窗期。
+- **宵夜時段**：依當下時段判斷推薦類型，新增 20:00 - 06:00 → `supper`，時段標籤
+  改為「🌙 肚子餓了？」，篩選邏輯沿用 dinner。對應的 hour → meal 映射也套用到
+  adhoc 與 onboard 後的立即推薦。
+- **三家 carousel + ⭐ 首選標記**：每次推播改為三張卡片（左右滑動），加權排序中
+  分數最高者的時段標籤加上「⭐ 首選」。社交證明、擴展半徑提示按既有規則套用。
+- **「換一批」控制卡片**：carousel 之外另送一張 micro bubble，按下「換一批」會從
+  session cache 取出下一組三家；移除單卡的「換一個」按鈕。
+- **重設位置入口**：新增 `action=reset_location` postback（可綁定 Rich Menu）
+  與 reset 提示卡片（含 `line://nv/location` 按鈕）；同時 `重設` / `reset` 文字
+  指令也改走相同流程。重設時不再清空既有資料，只更新位置並回覆「已更新你的位置
+  為『{新地名}』！」。
+
+### 變更
+
+- **移除第二地點**：users 表移除 `location_2_lat` / `location_2_lng`
+  / `location_2_name`（內含 schema 改動與 `ALTER TABLE DROP COLUMN` 一次性
+  migration）；推薦不再有平日／週末位置切換邏輯，`pick_anchor_location()` 簽章
+  從 `(user, weekday)` 簡化為 `(user)`。
+- **簡化 Onboard 流程**：移除「再設一個」步驟、`ask_second_location_card` 與
+  `onboard_summary_card`；welcome 卡的「設定我的位置」按鈕改用 `line://nv/location`。
+- **連續換一批 > 2 次才送引導訊息**：因為每次展示三家，2 批等於已看過 9 家，
+  門檻由先前的 5 次調整為 2 次（per session 仍只發一次引導訊息）。
+
+### 技術細節
+
+- `database.py`：users 表 schema 縮減 + `LEGACY_USER_COLUMNS` migration；
+  `init_db()` 啟動時嘗試 drop 舊欄位。
+- `models.py`：`User` dataclass 移除 location_2 欄位。
+- `services/onboard.py`：簡化 `set_location` 為單欄位、移除 `next_empty_slot`、
+  新增 `mark_pending_reset()` / `consume_pending_reset()`（in-memory 集合）。
+- `services/restaurant.py`：新增 `meal_type_for_hour()` 與 `MEAL_TYPE_WEIGHTS["supper"]`
+  （沿用 dinner 權重）；移除已死掉的 `increment_swap()`。
+- `services/session.py`：`swap_count` → `batch_count`、`next_restaurant` → `next_batch(size=3)`、
+  `GUIDANCE_SWAP_THRESHOLD = 5` → `GUIDANCE_BATCH_THRESHOLD = 2`；新增
+  `get_active_session(line_user_id)` 用於「換一批」postback 查找 session。
+- `services/push.py`：`push_recommendation` 改推 carousel + 換一批控制卡片，支援
+  `prefix_messages` 讓 onboard 把確認訊息一起送出；新增 `push_swap_batch` 取代
+  舊的 `push_swap`。
+- `flex_messages/daily_push.py`：改名為 `build_daily_bubble`，新增
+  `build_daily_carousel` 與 `build_swap_batch_bubble`；移除單卡的「換一個」按鈕。
+- `flex_messages/onboard.py`：移除 `ask_second_location_card` / `onboard_summary_card`、
+  新增 `reset_location_card`。
+- `routers/webhook.py`：onboard 流程改為一次設定位置即完成並推 carousel；新增
+  `swap_batch` / `reset_location` postback handler；location handler 依序處理
+  pending reset → 首次 onboard → adhoc。
+
 ## [Unreleased] - 2026-05-23
 
 根據用戶回饋進行的推薦體驗優化，核心架構（FastAPI + APScheduler + SQLite）、

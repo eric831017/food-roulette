@@ -1,6 +1,11 @@
+import threading
 from typing import Optional
 
 from database import get_conn
+
+
+_pending_reset: set[str] = set()
+_pending_lock = threading.Lock()
 
 
 def get_user(line_user_id: str) -> Optional[dict]:
@@ -24,7 +29,6 @@ def reset_user(line_user_id: str) -> None:
         conn.execute(
             """UPDATE users
                SET location_1_lat = NULL, location_1_lng = NULL, location_1_name = NULL,
-                   location_2_lat = NULL, location_2_lng = NULL, location_2_name = NULL,
                    onboard_complete = 0
                WHERE line_user_id = ?""",
             (line_user_id,),
@@ -32,28 +36,14 @@ def reset_user(line_user_id: str) -> None:
 
 
 def set_location(
-    line_user_id: str, slot: int, lat: float, lng: float, name: Optional[str]
+    line_user_id: str, lat: float, lng: float, name: Optional[str]
 ) -> None:
-    if slot not in (1, 2):
-        raise ValueError("slot must be 1 or 2")
-    cols = {
-        1: ("location_1_lat", "location_1_lng", "location_1_name"),
-        2: ("location_2_lat", "location_2_lng", "location_2_name"),
-    }[slot]
     with get_conn() as conn:
         conn.execute(
-            f"UPDATE users SET {cols[0]} = ?, {cols[1]} = ?, {cols[2]} = ? "
-            f"WHERE line_user_id = ?",
+            "UPDATE users SET location_1_lat = ?, location_1_lng = ?, location_1_name = ? "
+            "WHERE line_user_id = ?",
             (lat, lng, name, line_user_id),
         )
-
-
-def next_empty_slot(user: dict) -> Optional[int]:
-    if user.get("location_1_lat") is None:
-        return 1
-    if user.get("location_2_lat") is None:
-        return 2
-    return None
 
 
 def mark_onboard_complete(line_user_id: str) -> None:
@@ -73,11 +63,20 @@ def add_exclusion(line_user_id: str, excluded_type: str) -> None:
         )
 
 
-def pick_anchor_location(user: dict, when_iso_weekday: int) -> Optional[tuple[float, float]]:
-    """when_iso_weekday: 1=Mon..7=Sun. Weekends use location_2 if set."""
-    use_loc_2 = when_iso_weekday in (6, 7) and user.get("location_2_lat") is not None
-    if use_loc_2:
-        return user["location_2_lat"], user["location_2_lng"]
+def pick_anchor_location(user: dict) -> Optional[tuple[float, float]]:
     if user.get("location_1_lat") is not None:
         return user["location_1_lat"], user["location_1_lng"]
     return None
+
+
+def mark_pending_reset(line_user_id: str) -> None:
+    with _pending_lock:
+        _pending_reset.add(line_user_id)
+
+
+def consume_pending_reset(line_user_id: str) -> bool:
+    with _pending_lock:
+        if line_user_id in _pending_reset:
+            _pending_reset.discard(line_user_id)
+            return True
+        return False
