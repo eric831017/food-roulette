@@ -11,9 +11,6 @@ CREATE TABLE IF NOT EXISTS users (
     location_1_lat REAL,
     location_1_lng REAL,
     location_1_name TEXT,
-    location_2_lat REAL,
-    location_2_lng REAL,
-    location_2_name TEXT,
     onboard_complete INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -68,9 +65,19 @@ CREATE TABLE IF NOT EXISTS user_blacklist (
 """
 
 
+LEGACY_USER_COLUMNS = ("location_2_lat", "location_2_lng", "location_2_name")
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        for col in LEGACY_USER_COLUMNS:
+            if col in cols:
+                try:
+                    conn.execute(f"ALTER TABLE users DROP COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
 
 
 @contextmanager
