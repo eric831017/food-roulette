@@ -2,6 +2,30 @@
 
 本專案的所有重大變更都會記錄在這個檔案。
 
+## [Unreleased] - 2026-06-12
+
+卡片資訊豐富度增強。
+
+### 新增
+
+- **IG 短影音次要按鈕**：每張推薦卡片的 footer 在「帶我去」下方新增
+  「🎬 看 IG 短影音」secondary 按鈕。點擊後經由 redirect tracker 跳轉至
+  Instagram explore search（以店家名稱為關鍵字），同時記錄 `ig_click` 事件
+  供後續分析。
+- 連結為即時組成，不需要新資料表或人工策展對照表；店名取自 `push_logs.place_name`，
+  IG URL 模板若 Instagram 改路徑只需動 `routers/redirect.py` 一行。
+
+### 技術細節
+
+- `services/tracking.py`：新增 `ig_search_url_for(push_log_id)`，沿用既有
+  HMAC 簽章。
+- `routers/redirect.py`：新增 `action == "ig"` 分支，redirect 至
+  `https://www.instagram.com/explore/search/keyword/?q={place_name}` 並寫入
+  `ig_click` 事件。與 `navigate` 分支不同的是不呼叫 `mark_accepted`——
+  點 IG 不代表用戶要去這家，避免污染「接受率」訊號。
+- `flex_messages/daily_push.py`：footer contents 由 2 個元素改為 3 個
+  （帶我去 / IG 短影音 / 不要再推這家）。
+
 ## [Unreleased] - 2026-06-08
 
 第二輪整合更新：簡化 Onboard、改為三家 carousel、新增重設位置入口、加入宵夜時段，
