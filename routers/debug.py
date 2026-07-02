@@ -12,6 +12,11 @@ from fastapi import APIRouter, Header, HTTPException
 
 from config import TRACKING_SECRET
 from scheduler import _all_onboarded_users, _push_to_all
+from services.settings import (
+    MEAL_TYPES,
+    all_meal_push_settings,
+    set_meal_push_enabled,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/debug")
@@ -47,3 +52,30 @@ async def trigger_meal_push(
     logger.info("debug trigger: %s push to %d users", meal_type, len(users))
     await _push_to_all(meal_type)
     return {"status": "ok", "meal_type": meal_type, "eligible_users": len(users)}
+
+
+@router.get("/push-settings")
+def get_push_settings(x_debug_secret: Optional[str] = Header(default=None)):
+    """Return the current per-meal scheduled-push switches."""
+    _check_secret(x_debug_secret)
+    return {"meal_push_enabled": all_meal_push_settings()}
+
+
+@router.post("/push-settings/{meal_type}/{state}")
+def update_push_setting(
+    meal_type: str,
+    state: str,
+    x_debug_secret: Optional[str] = Header(default=None),
+):
+    """Turn a meal's scheduled push on or off globally (all users).
+
+    state: "on" | "off". Only affects scheduled pushes (which consume the LINE
+    push quota); onboard and adhoc replies are never gated.
+    """
+    _check_secret(x_debug_secret)
+    if meal_type not in MEAL_TYPES:
+        raise HTTPException(status_code=400, detail="invalid meal_type")
+    if state not in {"on", "off"}:
+        raise HTTPException(status_code=400, detail="state must be 'on' or 'off'")
+    set_meal_push_enabled(meal_type, state == "on")
+    return {"status": "ok", "meal_push_enabled": all_meal_push_settings()}

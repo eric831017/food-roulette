@@ -2,6 +2,30 @@
 
 本專案的所有重大變更都會記錄在這個檔案。
 
+## [Unreleased] - 2026-07-02
+
+新增全域餐別推播開關，用來節省 LINE push 月配額。
+
+### 新增
+
+- **每餐推播開關（全域）**：可分別控制早餐 / 午餐 / 晚餐三個排程推播要不要發送，
+  對所有使用者一體適用。設定持久化在新的 `app_settings` 表，服務重啟後保留；
+  無設定時預設全開，維持既有行為。
+  - `GET  /debug/push-settings` 查看三餐目前開關狀態
+  - `POST /debug/push-settings/{breakfast|lunch|dinner}/{on|off}` 切換
+  - 兩者皆需 `X-Debug-Secret` header（等於 `TRACKING_SECRET`）。
+- **只擋排程推播**：開關僅作用於 scheduler 的 `push_message`（會吃 push 配額）。
+  Onboard 後的立即推薦與 adhoc 皆走 `reply_message`（不吃配額），刻意不受開關影響——
+  關掉早餐時，當下 onboard 的新用戶仍能立即拿到卡片。
+
+### 技術細節
+
+- `database.py`：新增 `app_settings(key, value, updated_at)` key-value 表。
+- `services/settings.py`（新檔）：`is_meal_push_enabled` / `set_meal_push_enabled` /
+  `all_meal_push_settings`，用 `INSERT ... ON CONFLICT` upsert。
+- `scheduler.py`：`_push_to_all` 開頭檢查開關，關閉時記 log 並直接 return。
+- `routers/debug.py`：新增 push-settings 的 GET / POST 端點。
+
 ## [Unreleased] - 2026-06-12
 
 卡片資訊豐富度增強。

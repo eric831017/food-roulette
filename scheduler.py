@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from config import TIMEZONE
 from database import get_conn
 from services.push import push_recommendation, push_weekly_digest_to
+from services.settings import is_meal_push_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,9 @@ def _all_onboarded_users() -> list[str]:
 
 
 async def _push_to_all(meal_type: str) -> None:
+    if not is_meal_push_enabled(meal_type):
+        logger.info("scheduled %s push skipped: disabled by app setting", meal_type)
+        return
     users = _all_onboarded_users()
     logger.info("scheduled %s push to %d users", meal_type, len(users))
     for uid in users:
