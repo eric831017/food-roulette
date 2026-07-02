@@ -42,6 +42,11 @@ def phone_url_for(push_log_id: int) -> str:
     return f"{BASE_URL}/r/{tid}"
 
 
+def ig_search_url_for(push_log_id: int) -> str:
+    tid = encode_tracking_id(push_log_id, "ig")
+    return f"{BASE_URL}/r/{tid}"
+
+
 def log_event(
     line_user_id: str,
     event_type: str,

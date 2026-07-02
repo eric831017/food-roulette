@@ -2,6 +2,54 @@
 
 本專案的所有重大變更都會記錄在這個檔案。
 
+## [Unreleased] - 2026-07-02
+
+新增全域餐別推播開關，用來節省 LINE push 月配額。
+
+### 新增
+
+- **每餐推播開關（全域）**：可分別控制早餐 / 午餐 / 晚餐三個排程推播要不要發送，
+  對所有使用者一體適用。設定持久化在新的 `app_settings` 表，服務重啟後保留；
+  無設定時預設全開，維持既有行為。
+  - `GET  /debug/push-settings` 查看三餐目前開關狀態
+  - `POST /debug/push-settings/{breakfast|lunch|dinner}/{on|off}` 切換
+  - 兩者皆需 `X-Debug-Secret` header（等於 `TRACKING_SECRET`）。
+- **只擋排程推播**：開關僅作用於 scheduler 的 `push_message`（會吃 push 配額）。
+  Onboard 後的立即推薦與 adhoc 皆走 `reply_message`（不吃配額），刻意不受開關影響——
+  關掉早餐時，當下 onboard 的新用戶仍能立即拿到卡片。
+
+### 技術細節
+
+- `database.py`：新增 `app_settings(key, value, updated_at)` key-value 表。
+- `services/settings.py`（新檔）：`is_meal_push_enabled` / `set_meal_push_enabled` /
+  `all_meal_push_settings`，用 `INSERT ... ON CONFLICT` upsert。
+- `scheduler.py`：`_push_to_all` 開頭檢查開關，關閉時記 log 並直接 return。
+- `routers/debug.py`：新增 push-settings 的 GET / POST 端點。
+
+## [Unreleased] - 2026-06-12
+
+卡片資訊豐富度增強。
+
+### 新增
+
+- **IG 短影音次要按鈕**：每張推薦卡片的 footer 在「帶我去」下方新增
+  「🎬 看 IG 短影音」secondary 按鈕。點擊後經由 redirect tracker 跳轉至
+  Instagram explore search（以店家名稱為關鍵字），同時記錄 `ig_click` 事件
+  供後續分析。
+- 連結為即時組成，不需要新資料表或人工策展對照表；店名取自 `push_logs.place_name`，
+  IG URL 模板若 Instagram 改路徑只需動 `routers/redirect.py` 一行。
+
+### 技術細節
+
+- `services/tracking.py`：新增 `ig_search_url_for(push_log_id)`，沿用既有
+  HMAC 簽章。
+- `routers/redirect.py`：新增 `action == "ig"` 分支，redirect 至
+  `https://www.instagram.com/explore/search/keyword/?q={place_name}` 並寫入
+  `ig_click` 事件。與 `navigate` 分支不同的是不呼叫 `mark_accepted`——
+  點 IG 不代表用戶要去這家，避免污染「接受率」訊號。
+- `flex_messages/daily_push.py`：footer contents 由 2 個元素改為 3 個
+  （帶我去 / IG 短影音 / 不要再推這家）。
+
 ## [Unreleased] - 2026-06-08
 
 第二輪整合更新：簡化 Onboard、改為三家 carousel、新增重設位置入口、加入宵夜時段，

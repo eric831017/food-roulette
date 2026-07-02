@@ -2,7 +2,7 @@ from urllib.parse import urlencode
 
 from config import GOOGLE_MAPS_API_KEY
 from models import Restaurant
-from services.tracking import navigate_url_for
+from services.tracking import ig_search_url_for, navigate_url_for
 
 MEAL_LABELS = {
     "breakfast": "☀️ 早安，今天吃這個",
@@ -165,6 +165,16 @@ def build_daily_bubble(
                     },
                     "style": "primary",
                     "color": "#0F6E56",
+                    "height": "sm",
+                },
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "uri",
+                        "label": "🎬 看 IG 短影音",
+                        "uri": ig_search_url_for(push_log_id),
+                    },
+                    "style": "secondary",
                     "height": "sm",
                 },
                 {

@@ -38,4 +38,10 @@ def redirect_handler(tracking_id: str):
         phone = payload.get("p") or ""
         return RedirectResponse(url=f"tel:{phone}", status_code=302)
 
+    if action == "ig":
+        log_event(row["line_user_id"], "ig_click", push_log_id=push_log_id)
+        query = quote(row["place_name"] or "")
+        url = f"https://www.instagram.com/explore/search/keyword/?q={query}"
+        return RedirectResponse(url=url, status_code=302)
+
     raise HTTPException(status_code=400, detail="unknown action")

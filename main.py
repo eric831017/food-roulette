@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from database import init_db
-from routers import redirect, webhook
+from routers import debug, redirect, webhook
 from scheduler import start_scheduler
 
 logging.basicConfig(
@@ -27,6 +27,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Food Roulette", lifespan=lifespan)
 app.include_router(webhook.router)
 app.include_router(redirect.router)
+app.include_router(debug.router)
 
 
 @app.get("/")

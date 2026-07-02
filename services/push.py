@@ -107,10 +107,12 @@ def _send(
         _api().reply_message(ReplyMessageRequest(
             replyToken=reply_token, messages=messages,
         ))
+        logger.info("replied %d message(s) to %s", len(messages), line_user_id)
     else:
         _api().push_message(PushMessageRequest(
             to=line_user_id, messages=messages,
         ))
+        logger.info("pushed %d message(s) to %s", len(messages), line_user_id)
 
 
 async def push_recommendation(
